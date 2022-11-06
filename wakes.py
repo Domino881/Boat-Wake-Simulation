@@ -1,58 +1,59 @@
+# Boat wake simulation (06.11.2022)
+# Author: Dominik Kuczynski
+
 # Code for generating 3d plots of boat wake patterns.
 # A point source of surface waves of different wavelengths ('lambdas')
-# travels at speed 'v' and always ends up in the same place of the graph -
-# x=0, y=proportion*ymax. 
-# Some values are first stored in large arrays during preprocessing to
-# speed dup computation time. Other factors that affect time are t_nsteps
-# and n_lbdas. Gen_omega is the dispersion relation for deep water waves.
+# travels at speed 'v', ending up in a set place. 
+# To speed up computation time, some values are first stored in large arrays
+# during preprocessing. Other factors that affect time are t_nsteps
+# and n_lbdas.
 
 from mpl_toolkits import mplot3d
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.interpolate import griddata
+from scipy.ndimage.filters import gaussian_filter
 
-fig = plt.figure(figsize = (15,15))
-ax = fig.add_subplot(111,projection='3d')
-ax.view_init(elev=90, azim=270)
-ax.set(zlim=[0,2])
-
+# initiate the axes
+ymax = 40
+xmax = ymax
+pixelsize = 0.4
 proportion = 8.0/9.0
-ymax = 60
-# xmax = 2*np.tan(19.47*360/(2*np.pi))*proportion*ymax
-xmax = 60
-pixel = 0.1
-
-x = np.arange(-xmax, xmax, pixel)
-y = np.arange(0, 2*ymax, pixel)
+x = np.arange(-xmax, xmax, pixelsize)
+y = np.arange(0, 2*ymax, pixelsize)
 X, Y = np.meshgrid(x, y)
-Z = np.zeros(np.shape(X))
+Z = np.ones(np.shape(X))
 
 
-v=8.0
-A = 0.002
+############################### set system properties #########################
+v = 4.13 # speed of boat
+A = 5e-5 # amplitude of displacement
 
-#set time variables
+################################ set time variables ###########################
 tmax = (2*ymax*proportion+5.0)/v
-t_nsteps=50
-tstep = tmax/t_nsteps
+t_nsteps=400
+tstep = 2*tmax/t_nsteps
 
-#set the shift
-shift = v*tmax - 2*proportion*ymax
-Y = Y+shift
-
-#set lambda variables
-lbdamin = 0.5
-lbdamax = 5.0
-n_lbdas = 30
+################################ set lambda variables #########################
+lbdamin = 0.423
+lbdamax = 4.5
+n_lbdas = 100
 lbda_step = (lbdamax-lbdamin)/n_lbdas
 lbdas = np.arange(lbdamin, lbdamax, lbda_step)
 
+
+# shift Y axis to place boat in the right place
+shift = v*tmax - 2*proportion*ymax
+Y = Y+shift
+
+# dispersion relation for deep water waves
 def gen_omega(k):
-    return np.sqrt(9.81*k)
+    return np.sqrt(9.81*k) # cp approx. 3.13
 
 def preprocess():
     # do preprocessing
-    xsize = int(np.ceil(2*xmax/pixel))
-    ysize = int(np.ceil(2*ymax/pixel))
+    xsize = int(np.ceil(2*xmax/pixelsize))
+    ysize = int(np.ceil(2*ymax/pixelsize))
     
     r = np.zeros((t_nsteps, ysize, xsize))
     # r - 3d array of distances from the points source at given time
@@ -74,17 +75,31 @@ def preprocess():
     
 checks, r = preprocess()
 
-# run code
-for lbda in range(len(lbdas)):
-    print('\rlambda = %.3f  - %d/%d' %(lbdas[lbda], lbda, len(lbdas)),
-          end='', flush=True)
-        
+# run simulation
+for lbda in range(len(lbdas)):        
     k = 2*np.pi/lbdas[lbda]
     omega = gen_omega(k)
     cp = omega/k
 
     for t in range(t_nsteps): 
-        Z += A*checks[lbda][t]*np.cos((k*r[t]+omega*(tmax-t*tstep)))
+        Z += A*checks[lbda][t]*np.exp(-0.02*r[t]*(tmax-t*tstep))*\
+            np.cos((k*r[t]-omega*(tmax-t*tstep)))
+        # add to Z a damped cosine surface wave originating at (0,vt) and
+        # propagating for tmax-t time
+        
+    print('\rlambda = %.3f  - %d/%d' %(lbdas[lbda], lbda+1, len(lbdas)),
+          end='', flush=True)
+print("")
 
+# create the figure
+fig = plt.figure(figsize = (15,15))
+ax = fig.add_subplot(111, projection='3d')
+ax.view_init(elev=35, azim=110)
+ax.set(zlim=[0,2])
+ax.set_title("%d lambdas in (%.2f, %.2f), " %(n_lbdas, lbdamin, lbdamax) +\
+             "ymax=%d, pixelsize=%.2f, t_nsteps=%d"%(ymax,pixelsize,t_nsteps)+\
+             ", v=%.2f"%(v))
 
-ax.plot_surface(X,Y,Z, cmap = plt.cm.cividis)
+# plot the surface
+ax.plot_surface(X,Y,Z, cmap = plt.cm.bone, rcount=400, ccount=400,
+                antialiased=False)
